@@ -127,6 +127,10 @@
   .ctrl{ display:flex; flex-direction:column; gap:6px; min-width:200px; flex:1; }
   .ctrl label{ font-size:12.5px; font-weight:700; color:var(--azul-escuro); display:flex; justify-content:space-between; gap:8px; }
   .ctrl label output{ font-weight:800; }
+  .num-wrap{ display:inline-flex; align-items:center; gap:4px; font-weight:800; }
+  .num-in{ width:72px; font-family:inherit; font-size:13px; font-weight:800; color:var(--azul-escuro); border:1px solid var(--tom-20); border-radius:6px; padding:3px 6px; background:var(--branco); text-align:right; }
+  .num-in:focus{ outline:2px solid var(--azul-escuro); outline-offset:1px; }
+  .num-in.erro{ border-color:var(--preto); outline:2px solid var(--preto); }
   .ctrl-readout{ flex-basis:100%; font-size:13px; color:var(--azul-escuro); border-top:1px solid var(--tom-20); padding-top:12px; }
   .ctrl-readout b{ font-weight:800; }
   input[type=range]{ width:100%; accent-color:var(--azul-escuro); height:28px; }
@@ -372,8 +376,10 @@
           </dl>
         </div>
         <div class="demo-main">
-          <div class="demo-head"><div><h4>Margem por hectare, soja</h4><div class="sub">R$ mil por hectare, por preço e produtividade. Clique em uma célula para definir o cenário base.</div></div><span class="badge">Dados ilustrativos</span></div>
+          <div class="demo-head"><div><h4>Margem por hectare, soja</h4><div class="sub">R$ mil por hectare. O mapa se centraliza no cenário base, com variações de R$ 5/saca e 3 sc/ha. Defina o cenário base nos controles ou clicando em uma célula.</div></div><span class="badge">Dados ilustrativos</span></div>
           <div class="controls">
+            <div class="ctrl"><label for="r-preco-base">Preço da saca, cenário base <span class="num-wrap">R$ <input type="number" class="num-in tabnum" id="n-preco-base" min="50" max="250" step="0.5" value="115" aria-label="Preço da saca em reais, digitar valor"></span></label><input type="range" id="r-preco-base" min="50" max="250" step="0.5" value="115"></div>
+            <div class="ctrl"><label for="r-prod-base">Produtividade, cenário base <span class="num-wrap"><input type="number" class="num-in tabnum" id="n-prod-base" min="20" max="120" step="0.5" value="63" aria-label="Produtividade em sacas por hectare, digitar valor"> sc/ha</span></label><input type="range" id="r-prod-base" min="20" max="120" step="0.5" value="63"></div>
             <div class="ctrl"><label for="r-custo">Custo variável por hectare <output id="o-custo" class="tabnum"></output></label><input type="range" id="r-custo" min="3000" max="6000" step="100" value="4300"></div>
             <div class="ctrl"><label for="r-fixo">Custo fixo da estrutura por safra <output id="o-fixo" class="tabnum"></output></label><input type="range" id="r-fixo" min="500000" max="5000000" step="50000" value="2250000"></div>
             <div class="ctrl"><label for="r-area">Área plantada <output id="o-area" class="tabnum"></output></label><input type="range" id="r-area" min="500" max="5000" step="100" value="1500"></div>
@@ -642,6 +648,7 @@
     rows.forEach(r=>{ h+='<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>'; });
     target.innerHTML=h+'</tbody></table>';
   }
+  const fN = v => Number.isInteger(v)?f0.format(v):f1.format(v);   // número com decimal só quando houver
   const mil = v => neg(v)+'R$ '+f0.format(abs(v))+' mil';          // v em R$ mil
   const mi  = v => neg(v)+'R$ '+f2.format(abs(v)/1000)+' mi';      // v em R$ mil
   document.getElementById('logo-footer').src = document.getElementById('logo-nav').src;
@@ -722,7 +729,7 @@
   function renderPremissas(){
     const c=custoHa();
     $('#premissas').innerHTML='<span class="pm-t">Premissas em uso</span>'+
-      '<span><b>R$ '+S.p+'</b>/saca</span><span><b>'+S.q+'</b> sc/ha</span><span><b>'+f0.format(S.area)+'</b> ha</span>'+
+      '<span><b>R$ '+fN(S.p)+'</b>/saca</span><span><b>'+fN(S.q)+'</b> sc/ha</span><span><b>'+f0.format(S.area)+'</b> ha</span>'+
       '<span>Custo <b>R$ '+f0.format(c.total)+'</b>/ha</span><span>Fixo <b>R$ '+f2.format(S.cFixo/1e6)+' mi</b></span>'+
       ($('#p-sens').hidden?'<button type="button" class="pm-link" id="pm-ajustar">Ajustar no mapa de sensibilidade</button>':'<span class="pm-hint">Altere aqui e todas as análises acompanham</span>');
     const b=$('#pm-ajustar'); if(b) b.onclick=()=>selectTab($('#t-sens'));
@@ -772,11 +779,26 @@
   // =====================================================
   // 1. SENSIBILIDADE (mapa de calor): define os parâmetros
   // =====================================================
-  const precos=[100,105,110,115,120,125,130];
-  const prods=[72,69,66,63,60,57,54];
+  const PASSO_P=5, PASSO_Q=3;                        // variação entre colunas e linhas do mapa
+  const r1=v=>Math.round(v*10)/10;
+  let precos=[], prods=[];
+  function eixos(){
+    precos=[-3,-2,-1,0,1,2,3].map(k=>r1(S.p+k*PASSO_P));
+    prods=[3,2,1,0,-1,-2,-3].map(k=>r1(S.q+k*PASSO_Q));
+  }
+  // sincroniza controle deslizante + campo numérico do cenário base
+  const BASE_CTRL=[['p','#r-preco-base','#n-preco-base'],['q','#r-prod-base','#n-prod-base']];
+  function sincronizarBase(){ BASE_CTRL.forEach(([k,r,n])=>{ $(r).value=S[k]; if(document.activeElement!==$(n)){ $(n).value=S[k]; $(n).classList.remove('erro'); } }); }
+  BASE_CTRL.forEach(([k,r,n])=>{
+    const rng=$(r), num=$(n), mn=+rng.min, mx=+rng.max;
+    rng.addEventListener('input',()=>{ S[k]=+rng.value; num.value=S[k]; atualizar(); });
+    num.addEventListener('input',()=>{ const v=parseFloat(String(num.value).replace(',','.')); if(isNaN(v)||v<mn||v>mx){ num.classList.add('erro'); return; } num.classList.remove('erro'); S[k]=r1(v); rng.value=S[k]; atualizar(); });
+    num.addEventListener('change',()=>{ let v=parseFloat(String(num.value).replace(',','.')); if(isNaN(v)) v=S[k]; v=r1(Math.min(mx,Math.max(mn,v))); num.value=v; num.classList.remove('erro'); if(v===S[k]) return; S[k]=v; rng.value=v; atualizar(); });
+  });
   const MAXV=4500; // R$/ha no tom mais escuro
-  function lerParametros(){ S.cVar=+$('#r-custo').value; S.cFixo=+$('#r-fixo').value; S.area=+$('#r-area').value; }
+  function lerParametros(){ S.cVar=+$('#r-custo').value; S.cFixo=+$('#r-fixo').value; S.area=+$('#r-area').value; S.p=+$('#r-preco-base').value; S.q=+$('#r-prod-base').value; }
   function renderSens(){
+    eixos(); sincronizarBase();
     const c=custoHa(), custo=c.total;
     $('#o-custo').textContent='R$ '+f0.format(S.cVar)+'/ha';
     $('#o-fixo').textContent='R$ '+f2.format(S.cFixo/1e6)+' mi';
@@ -785,11 +807,11 @@
     const heat=$('#heat'); heat.innerHTML='';
     heat.style.gridTemplateColumns='minmax(30px,.8fr) repeat('+precos.length+',1fr)';
     const corner=document.createElement('div'); corner.className='hc hdr'; heat.appendChild(corner);
-    precos.forEach(p=>{ const d=document.createElement('div'); d.className='hc hdr'; d.textContent=p; heat.appendChild(d); });
+    precos.forEach(p=>{ const d=document.createElement('div'); d.className='hc hdr'; d.textContent=fN(p); heat.appendChild(d); });
     let nNeg=0; const rowsT=[];
     prods.forEach(q=>{
-      const lab=document.createElement('div'); lab.className='hc hdr'; lab.textContent=q; heat.appendChild(lab);
-      const tr=[q+' sc/ha'];
+      const lab=document.createElement('div'); lab.className='hc hdr'; lab.textContent=fN(q); heat.appendChild(lab);
+      const tr=[fN(q)+' sc/ha'];
       precos.forEach(p=>{
         const rec=p*q*(1-DED), m=rec-custo, d=document.createElement('div'), isBase=(p===S.p && q===S.q);
         d.className='hc cell tabnum'; d.tabIndex=0; d.setAttribute('role','button');
@@ -797,12 +819,13 @@
         else { const t=0.06+0.94*Math.min(m/MAXV,1); d.style.background=mix(t); d.style.color= t>0.58?C.branco:C.esc; }
         if(isBase) d.classList.add('base');
         d.textContent=neg(m)+f1.format(abs(m)/1000);
-        const html='<b>'+(isBase?'Cenário base: ':'')+'R$ '+p+'/saca, '+q+' sc/ha</b>'+row('Receita líquida/ha','R$ '+f0.format(rec))+row('Custo variável/ha','R$ '+f0.format(S.cVar))+row('Custo fixo/ha','R$ '+f0.format(c.fixoHa))+row('Custo total/ha','R$ '+f0.format(custo))+row('Margem/ha',sgn(m)+'R$ '+f0.format(abs(m)))+row('Margem %',neg(m)+f1.format(abs(m/rec*100))+'%')+row('Resultado operacional',sgn(m)+'R$ '+f2.format(abs(m)*S.area/1e6)+' mi')+(isBase?'':'<div style="margin-top:6px;opacity:.85">Clique para usar como cenário base</div>');
-        d.setAttribute('aria-label','Preço '+p+', produtividade '+q+', margem '+f0.format(m)+' reais por hectare'+(isBase?', cenário base':', clique para usar como cenário base'));
+        const html='<b>'+(isBase?'Cenário base: ':'')+'R$ '+fN(p)+'/saca, '+fN(q)+' sc/ha</b>'+row('Receita líquida/ha','R$ '+f0.format(rec))+row('Custo variável/ha','R$ '+f0.format(S.cVar))+row('Custo fixo/ha','R$ '+f0.format(c.fixoHa))+row('Custo total/ha','R$ '+f0.format(custo))+row('Margem/ha',sgn(m)+'R$ '+f0.format(abs(m)))+row('Margem %',neg(m)+f1.format(abs(m/rec*100))+'%')+row('Resultado operacional',sgn(m)+'R$ '+f2.format(abs(m)*S.area/1e6)+' mi')+(isBase?'':'<div style="margin-top:6px;opacity:.85">Clique para usar como cenário base</div>');
+        d.setAttribute('aria-label','Preço '+fN(p)+', produtividade '+fN(q)+', margem '+f0.format(m)+' reais por hectare'+(isBase?', cenário base':', clique para usar como cenário base'));
         d.addEventListener('pointermove',e=>showTip(html,e.clientX,e.clientY));
         d.addEventListener('pointerleave',hideTip);
         d.addEventListener('focus',()=>tipAt(d,html)); d.addEventListener('blur',hideTip);
-        const escolher=()=>{ S.p=p; S.q=q; hideTip(); atualizar(); const nb=$('#heat .base'); if(nb) nb.focus({preventScroll:true}); };
+        const lim=(id,v)=>Math.min(+$(id).max,Math.max(+$(id).min,v));
+        const escolher=()=>{ S.p=lim('#r-preco-base',p); S.q=lim('#r-prod-base',q); hideTip(); atualizar(); const nb=$('#heat .base'); if(nb) nb.focus({preventScroll:true}); };
         d.addEventListener('click',escolher);
         d.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); escolher(); } });
         heat.appendChild(d);
@@ -816,7 +839,7 @@
     $('#s-res').textContent=sgn(mBase)+'R$ '+f2.format(abs(mBase)*S.area/1e6)+' mi';
     $('#s-res-lbl').textContent='Resultado operacional no cenário base';
     const qEq=custo/(S.p*(1-DED)), pEq=custo/(S.q*(1-DED));
-    $('#s-eq-lbl').textContent='Produtividade de equilíbrio a R$ '+S.p+'/saca';
+    $('#s-eq-lbl').textContent='Produtividade de equilíbrio a R$ '+fN(S.p)+'/saca';
     $('#s-eq').textContent=f1.format(qEq)+' sc/ha';
     $('#s-neg').textContent=nNeg+' de '+(precos.length*prods.length);
     const folga=(S.q-qEq)/S.q*100;
@@ -825,7 +848,7 @@
     $('#sens-insight').innerHTML = (mBase>=0
       ? 'Com custo de R$ '+f0.format(custo)+'/ha, a produtividade pode cair <b>'+f1.format(folga)+'%</b> (até '+f1.format(qEq)+' sc/ha) ou o preço pode cair até <b>R$ '+f1.format(pEq)+'/saca</b> antes de a safra entrar no prejuízo.'
       : 'Com custo de R$ '+f0.format(custo)+'/ha, o cenário base já opera com prejuízo: seria preciso produzir '+f1.format(qEq)+' sc/ha ou vender a R$ '+f1.format(pEq)+'/saca para empatar.') + escala;
-    table($('#tbl-sens'), ['Produtividade \\ Preço'].concat(precos.map(p=>'R$ '+p)), rowsT);
+    table($('#tbl-sens'), ['Produtividade \\ Preço'].concat(precos.map(p=>'R$ '+fN(p))), rowsT);
   }
   ['#r-custo','#r-fixo','#r-area'].forEach(id=>$(id).addEventListener('input',()=>{ lerParametros(); atualizar(); }));
 
@@ -940,7 +963,7 @@
   function renderDre(){
     const pv=+$('#r-preco').value; $('#o-preco').textContent=(pv>0?'+':pv<0?'−':'')+abs(pv)+'%';
     const D=dre(1+pv/100), B=dre(1);
-    $('#dre-sub').textContent='Safra 2026/27, '+f0.format(S.area)+' ha a R$ '+f1.format(S.p*(1+pv/100))+'/saca e '+S.q+' sc/ha';
+    $('#dre-sub').textContent='Safra 2026/27, '+f0.format(S.area)+' ha a R$ '+f1.format(S.p*(1+pv/100))+'/saca e '+fN(S.q)+' sc/ha';
     const box=$('#dre-chart'); const W=Math.max(box.clientWidth,300); box.innerHTML='';
     const narrow=W<520, labW=narrow?112:180, rowH=narrow?30:32, top=4, H=top+D.linhas.length*rowH+6;
     const svg=el('svg',{viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'DRE gerencial em cascata'},box);
